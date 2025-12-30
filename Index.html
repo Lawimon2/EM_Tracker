@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบติดตามที่อยู่พนักงาน</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&display=swap');
+        * { font-family: 'Sarabun', sans-serif; }
+        .slide-in { animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-50">
+    <div id="app"></div>
+
+    <script>
+        let employees = [];
+        let currentView = 'list';
+        let searchTerm = '';
+        let editingId = null;
+
+        async function loadData() {
+            try {
+                const result = await window.storage.get('employees_data');
+                if (result && result.value) {
+                    employees = JSON.parse(result.value);
+                }
+            } catch (error) {
+                console.log('No data found');
+            }
+            render();
+        }
+
+        async function saveData() {
+            if (employees.length > 0) {
+                try {
+                    await window.storage.set('employees_data', JSON.stringify(employees));
+                } catch (err) {
+                    console.error('Storage error:', err);
+                }
+            }
+        }
+
+        function calculateDuration(startDate) {
+            const start = new Date(startDate);
+            const now = new Date();
+            const diffTime = Math.abs(now - start);
+            const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+            
+            const years = Math.floor(diffDays / 365);
+            const months = Math.floor((diffDays % 365) / 30);
+            const days = diffDays % 30;
+            
+            let result = [];
+            if (years > 0) result.push(`${years} ปี`);
+            if (months > 0) result.push(`${months} เดือน`);
+            if (days > 0 || result.length === 0) result.push(`${days} วัน`);
+            
+            return result.join(' ');
+        }
+
+        function addEmployee() {
+            const empId = document.getElementById('employeeId').value.trim();
+            const name = document.getElementById('name').value.trim();
+            const department = document.getElementById('department').value.trim();
+            const position = document.getElementById('position').value.trim();
+            const workStartDate = document.getElementById('workStartDate').value;
+            const address = document.getElementById('address').value.trim();
+
+            if (!empId || !name || !department || !position || !workStartDate) {
+                alert('กรุณากรอกข้อมูลให้ครบถ้วน');
+                return;
+            }
+
+            if (editingId === null) {
+                if (!address) {
+                    alert('กรุณากรอกที่อยู่');
+                    return;
+                }
+                if (employees.some(emp => emp.employeeId === empId)) {
+                    alert('รหัสพนักงานนี้มีในระบบแล้ว');
+                    return;
+                }
+
+                const currentDate = new Date().toISOString();
+                const newEmp = {
+                    id: Date.now(),
+                    employeeId: empId,
+                    name: name,
+                    department: department,
+                    position: position,
+                    workStartDate: workStartDate,
+                    currentAddress: {
+                        address: address,
+                        startDate: currentDate
+                    },
+                    addressHistory: [{
+                        address: address,
+                        startDate: currentDate
+                    }]
+                };
+                employees.push(newEmp);
+            } else {
+                employees = employees.map(emp => {
+                    if (emp.id === editingId) {
+                        return {
+                            ...emp,
+                            name: name,
+                            department: department,
+                            position: position,
+                            workStartDate: workStartDate
+                        };
+                    }
+                    return emp;
+                });
+                editingId = null;
+            }
+
+            saveData();
+            currentView = 'list';
+            render();
+        }
+
+        function deleteEmployee(id) {
+            if (confirm('ยืนยันการลบข้อมูล?')) {
+                employees = employees.filter(emp => emp.id !== id);
+                saveData();
+                render();
+            }
+        }
+
+        function updateAddress(id) {
+            const newAddress = prompt('ที่อยู่ใหม่:');
+            if (newAddress && newAddress.trim()) {
+                const currentDate = new Date().toISOString();
+                employees = employees.map(emp => {
+                    if (emp.id === id) {
+                        const newAddressObj = {
+                            address: newAddress.trim(),
+                            startDate: currentDate
+                        };
+                        return {
+                            ...emp,
+                            currentAddress: newAddressObj,
+                            addressHistory: [...emp.addressHistory, newAddressObj]
+                        };
+                    }
+                    return emp;
+                });
+                saveData();
+                render();
+            }
+        }
+
+        function editEmployee(emp) {
+            editingId = emp.id;
+            currentView = 'add';
+            render();
+            setTimeout(() => {
+                document.getElementById('employeeId').value = emp.employeeId;
+                document.getElementById('name').value = emp.name;
+                document.getElementById('department').value = emp.department;
+                document.getElementById('position').value = emp.position;
+                document.getElementById('workStartDate').value = emp.workStartDate;
+            }, 10);
+        }
+
+        function getDepartmentStats() {
+            if (employees.length === 0) return [];
+            const deptCount = {};
+            employees.forEach(emp => {
+                deptCount[emp.department] = (deptCount[emp.department] || 0) + 1;
+            });
+            return Object.entries(deptCount).map(([dept, count]) => ({
+                name: dept,
+                count,
+                percentage: ((count / employees.length) * 100).toFixed(1)
+            }));
+        }
+
+        function getAddressStats() {
+            if (employees.length === 0) return [];
+            const addressCount = {};
+            employees.forEach(emp => {
+                const addr = emp.currentAddress.address;
+                addressCount[addr] = (addressCount[addr] || 0) + 1;
+            });
+            return Object.entries(addressCount).map(([addr, count]) => ({
+                name: addr.length > 30 ? addr.substring(0, 30) + '...' : addr,
+                fullName: addr,
+                count,
+                percentage: ((count / employees.length) * 100).toFixed(1)
+            }));
+        }
+
+        function render() {
+            const app = document.getElementById('app');
+            const filteredEmployees = employees.filter(emp => {
+                const search = searchTerm.toLowerCase();
+                return emp.employeeId.toLowerCase().includes(search) ||
+                       emp.name.toLowerCase().includes(search) ||
+                       emp.department.toLowerCase().includes(search) ||
+                       emp.position.toLowerCase().includes(search);
+            });
+
+            let content = `
+                <div class="w-full min-h-screen pb-20 bg-slate-50">
+                    <div class="max-w-6xl mx-auto">
+                        <header class="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-4 sticky top-0 shadow-lg z-10">
+                            <h1 class="text-xl font-bold text-center">📍 ระบบติดตามที่อยู่พนักงาน</h1>
+                        </header>
+            `;
+
+            if (currentView === 'list') {
+                content += `
+                    <div class="p-4 slide-in">
+                        <div class="mb-4">
+                            <input 
+                                type="text"
+                                id="searchInput"
+                                placeholder="🔍 ค้นหา รหัส ชื่อ แผนก ตำแหน่ง"
+                                class="w-full p-3 rounded-xl border-2 border-gray-200 focus:border-blue-500 outline-none"
+                                value="${searchTerm}"
+                            />
+                        </div>
+
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="font-bold text-gray-700">รายชื่อพนักงาน (${filteredEmployees.length}/${employees.length})</h2>
+                            <div class="flex gap-2">
+                                <button onclick="currentView='chart'; render();" class="bg-purple-500 text-white px-3 py-2 rounded-full text-sm hover:bg-purple-600">
+                                    📊 สถิติ
+                                </button>
+                                <button onclick="editingId=null; currentView='add'; render();" class="bg-green-500 text-white px-3 py-2 rounded-full text-sm hover:bg-green-600">
+                                    ➕ เพิ่ม
+                                </button>
+                            </div>
+                        </div>
+
+                        ${filteredEmployees.length === 0 ? `
+                            <div class="text-center py-10 text-gray-400">
+                                ${searchTerm ? 'ไม่พบข้อมูลที่ค้นหา' : 'ยังไม่มีข้อมูลพนักงาน'}
+                            </div>
+                        ` : `
+                            <div class="grid md:grid-cols-2 gap-4">
+                                ${filteredEmployees.map(emp => `
+                                    <div class="bg-white p-4 rounded-xl shadow-md border-l-4 border-blue-500">
+                                        <div class="flex justify-between items-start mb-3">
+                                            <div class="flex-1">
+                                                <div class="text-xs text-gray-500">รหัส: ${emp.employeeId}</div>
+                                                <div class="font-bold text-lg text-blue-800">${emp.name}</div>
+                                                <div class="text-sm text-gray-600">
+                                                    🏢 ${emp.department} | ${emp.position}
+                                                </div>
+                                            </div>
+                                            <div class="flex gap-2">
+                                                <button onclick='editEmployee(${JSON.stringify(emp)})' class="text-blue-500 hover:text-blue-700 text-lg">
+                                                    ✏️
+                                                </button>
+                                                <button onclick="deleteEmployee(${emp.id})" class="text-red-400 hover:text-red-600 text-lg">
+                                                    🗑️
+                                                </button>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="text-xs text-gray-500 mb-2">
+                                            💼 อายุงาน: ${calculateDuration(emp.workStartDate)}
+                                        </div>
+                                        
+                                        <div class="bg-gray-50 p-3 rounded-lg mb-2">
+                                            <div class="flex justify-between items-start gap-2">
+                                                <div class="flex-1">
+                                                    <div class="text-xs text-gray-500 mb-1">ที่อยู่ปัจจุบัน:</div>
+                                                    <div class="text-sm text-gray-700">
+                                                        📍 ${emp.currentAddress.address}
+                                                    </div>
+                                                    <div class="text-xs text-gray-400 mt-1">
+                                                        อยู่มาแล้ว: ${calculateDuration(emp.currentAddress.startDate)}
+                                                    </div>
+                                                </div>
+                                                <button onclick="updateAddress(${emp.id})" class="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded hover:bg-blue-200 whitespace-nowrap">
+                                                    ✏️ เปลี่ยน
+                                                </button>
+                                            </div>
+                                        </div>
+                                        
+                                        ${emp.addressHistory.length > 1 ? `
+                                            <details class="text-xs">
+                                                <summary class="cursor-pointer text-blue-600 hover:text-blue-800">
+                                                    ประวัติที่อยู่ (${emp.addressHistory.length} ครั้ง)
+                                                </summary>
+                                                <div class="mt-2 space-y-2 pl-4">
+                                                    ${emp.addressHistory.slice().reverse().map((addr, idx) => `
+                                                        <div class="border-l-2 border-gray-300 pl-3">
+                                                            <div class="text-gray-700">${addr.address}</div>
+                                                            <div class="text-gray-400">
+                                                                ${new Date(addr.startDate).toLocaleDateString('th-TH')}
+                                                            </div>
+                                                        </div>
+                                                    `).join('')}
+                                                </div>
+                                            </details>
+                                        ` : ''}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        `}
+                    </div>
+                `;
+            } else if (currentView === 'chart') {
+                const deptStats = getDepartmentStats();
+                const addrStats = getAddressStats();
+                
+                content += `
+                    <div class="p-4 slide-in">
+                        <button onclick="currentView='list'; render();" class="mb-4 text-blue-600 hover:text-blue-800 font-medium">
+                            ← กลับ
+                        </button>
+                        
+                        <div class="space-y-6">
+                            <div class="bg-white p-6 rounded-2xl shadow-lg">
+                                <h2 class="text-xl font-bold mb-4 text-gray-800">
+                                    🏢 สถิติตามแผนก
+                                </h2>
+                                ${deptStats.length === 0 ? `
+                                    <div class="text-center text-gray-400 py-4">ยังไม่มีข้อมูล</div>
+                                ` : deptStats.map(dept => `
+                                    <div class="mb-4">
+                                        <div class="flex justify-between mb-1">
+                                            <span class="text-sm font-medium">${dept.name}</span>
+                                            <span class="text-sm text-gray-600">${dept.count} คน (${dept.percentage}%)</span>
+                                        </div>
+                                        <div class="w-full bg-gray-200 rounded-full h-8 overflow-hidden">
+                                            <div class="bg-gradient-to-r from-blue-500 to-blue-600 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold" style="width: ${Math.max(parseFloat(dept.percentage), 10)}%">
+                                                ${dept.percentage}%
+                                            </div>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+
+                            <div class="bg-white p-6 rounded-2xl shadow-lg">
+                                <h2 class="text-xl font-bold mb-4 text-gray-800">
+                                    📍 สถิติตามที่อยู่
+                                </h2>
+                                ${addrStats.length === 0 ? `
+                                    <div class="text-center text-gray-400 py-4">ยังไม่มีข้อมูล</div>
+                                ` : addrStats.map(addr => `
+                                    <div class="mb-4">
+                                        <div class="flex justify-between mb-1">
+                                            <span class="text-sm font-medium" title="${addr.fullName}">${addr.name}</span>
+                                            <span class="text-sm text-gray-600">${addr.count} คน (${addr.percentage}%)</span>
+                                        </div>
+                                        <div class="w-full bg-gray-200 rounded-full h-8 overflow-hidden">
+                                            <div class="bg-gradient-to-r from-red-500 to-red-600 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold" style="width: ${Math.max(parseFloat(addr.percentage), 10)}%">
+                                                ${addr.percentage}%
+                                            </div>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+
+                            <div class="bg-gradient-to-r from-purple-500 to-purple-600 p-6 rounded-2xl shadow-lg text-white">
+                                <h2 class="text-xl font-bold mb-4">
+                                    📊 สรุปภาพรวม
+                                </h2>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div class="bg-white bg-opacity-20 p-4 rounded-xl backdrop-blur-sm">
+                                        <div class="text-3xl font-bold">${employees.length}</div>
+                                        <div class="text-sm">พนักงานทั้งหมด</div>
+                                    </div>
+                                    <div class="bg-white bg-opacity-20 p-4 rounded-xl backdrop-blur-sm">
+                                        <div class="text-3xl font-bold">${deptStats.length}</div>
+                                        <div class="text-sm">แผนกทั้งหมด</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else if (currentView === 'add') {
+                content += `
+                    <div class="p-4 slide-in">
+                        <button onclick="currentView='list'; editingId=null; render();" class="mb-4 text-blue-600 hover:text-blue-800 font-medium">
+                            ← กลับ
+                        </button>
+                        <div class="bg-white p-6 rounded-2xl shadow-lg">
+                            <h2 class="text-lg font-bold mb-4">
+                                ${editingId ? '✏️ แก้ไขข้อมูลพนักงาน' : '➕ เพิ่มข้อมูลพนักงาน'}
+                            </h2>
+                            
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium mb-2">รหัสพนักงาน *</label>
+                                <input 
+                                    type="text"
+                                    id="employeeId"
+                                    ${editingId ? 'disabled' : ''}
+                                    class="w-full border-2 p-3 rounded-lg ${editingId ? 'bg-gray-100 cursor-not-allowed' : 'bg-gray-50'}"
+                                    placeholder="เช่น EMP001" 
+                                />
+                                ${editingId ? '<div class="text-xs text-gray-500 mt-1">ไม่สามารถแก้ไขรหัสพนักงานได้</div>' : ''}
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium mb-2">ชื่อ-นามสกุล *</label>
+                                <input 
+                                    type="text"
+                                    id="name"
+                                    class="w-full border-2 p-3 rounded-lg bg-gray-50 focus:border-blue-500 outline-none" 
+                                    placeholder="ระบุชื่อพนักงาน" 
+                                />
+                            </div>
+
+                            <div class="grid md:grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">แผนก *</label>
+                                    <input 
+                                        type="text"
+                                        id="department"
+                                        class="w-full border-2 p-3 rounded-lg bg-gray-50 focus:border-blue-500 outline-none" 
+                                        placeholder="เช่น ฝ่ายผลิต" 
+                                    />
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium mb-2">ตำแหน่ง *</label>
+                                    <input 
+                                        type="text"
+                                        id="position"
+                                        class="w-full border-2 p-3 rounded-lg bg-gray-50 focus:border-blue-500 outline-none" 
+                                        placeholder="เช่น พนักงานประจำ" 
+                                    />
+                                </div>
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium mb-2">วันที่เริ่มงาน *</label>
+                                <input 
+                                    type="date"
+                                    id="workStartDate"
+                                    class="w-full border-2 p-3 rounded-lg bg-gray-50 focus:border-blue-500 outline-none"
+                                    max="${new Date().toISOString().split('T')[0]}"
+                                />
+                            </div>
+
+                            ${editingId === null ? `
+                                <div class="mb-4">
+                                    <label class="block text-sm font-medium mb-2">ที่อยู่ปัจจุบัน *</label>
+                                    <textarea 
+                                        id="address"
+                                        class="w-full border-2 p-3 rounded-lg bg-gray-50 focus:border-blue-500 outline-none" 
+                                        rows="3"
+                                        placeholder="บ้านเลขที่ ถนน แขวง เขต จังหวัด รหัสไปรษณีย์"
+                                    ></textarea>
+                                </div>
+                            ` : ''}
+
+                            <button 
+                                onclick="addEmployee()"
+                                class="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 rounded-xl font-bold hover:from-blue-700 hover:to-blue-800 transition-all"
+                            >
+                                💾 ${editingId ? 'บันทึกการแก้ไข' : 'บันทึกข้อมูล'}
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            content += `
+                        <nav class="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around p-3 shadow-lg">
+                            <button 
+                                onclick="currentView='list'; render();"
+                                class="flex flex-col items-center transition-colors ${currentView === 'list' ? 'text-blue-600' : 'text-gray-400'}"
+                            >
+                                <span class="text-2xl">👥</span>
+                                <span class="text-xs mt-1">พนักงาน</span>
+                            </button>
+                            <button 
+                                onclick="currentView='chart'; render();"
+                                class="flex flex-col items-center transition-colors ${currentView === 'chart' ? 'text-blue-600' : 'text-gray-400'}"
+                            >
+                                <span class="text-2xl">📊</span>
+                                <span class="text-xs mt-1">สถิติ</span>
+                            </button>
+                            <button 
+                                onclick="editingId=null; currentView='add'; render();"
+                                class="flex flex-col items-center transition-colors ${currentView === 'add' ? 'text-blue-600' : 'text-gray-400'}"
+                            >
+                                <span class="text-2xl">➕</span>
+                                <span class="text-xs mt-1">เพิ่ม</span>
+                            </button>
+                        </nav>
+                    </div>
+                </div>
+            `;
+
+            app.innerHTML = content;
+
+            if (currentView === 'list') {
+                const searchInput = document.getElementById('searchInput');
+                if (searchInput) {
+                    searchInput.addEventListener('input', (e) => {
+                        searchTerm = e.target.value;
+                        render();
+                    });
+                }
+            }
+        }
+
+        loadData();
+    </script>
+</body>
+</html>
