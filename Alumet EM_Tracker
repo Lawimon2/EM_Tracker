@@ -1,0 +1,32 @@
+<script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function App() {
+            const [employees, setEmployees] = useState([]);
+            const [view, setView] = useState('list'); // 'list', 'add', 'chart'
+            const [searchTerm, setSearchTerm] = useState('');
+            const [editingId, setEditingId] = useState(null);
+
+            // โหลดข้อมูล
+            useEffect(() => {
+                const loadData = async () => {
+                    try {
+                        const result = await window.storage.get('employees_data');
+                        if (result && result.value) {
+                            setEmployees(JSON.parse(result.value));
+                        }
+                    } catch (error) {
+                        console.log('No data found');
+                    }
+                };
+                loadData();
+            }, []);
+
+            // บันทึกข้อมูล
+            useEffect(() => {
+                if (employees.length > 0) {
+                    window.storage.set('employees_data', JSON.stringify(employees)).catch(err => {
+                        console.error('Storage error:', err);
+                    });
+                }
+            }, [employees]);
